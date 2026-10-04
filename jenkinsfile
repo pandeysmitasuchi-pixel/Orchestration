@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+    environment {
+        AWS_ACCOUNT_ID = '356042515069'
+        AWS_REGION     = 'us-east-1'
+        ECR_FRONTEND   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/streaming-frontend"
+        ECR_BACKEND    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/streaming-backend"
+        IMAGE_TAG      = "${BUILD_NUMBER}"
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/pandeysmitasuchi-pixel/Orchestration.git'
+            }
+        }
+        stage('Build & Push Frontend') {
+            steps {
+                script {
+                    docker.withRegistry("https://${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com", "ecr:us-east-1:aws-credentials") {
+                        def frontImg = docker.build("${ECR_FRONTEND}:${IMAGE_TAG}", "-f docker/frontend/Dockerfile .")
+                        frontImg.push("${IMAGE_TAG}")
+                        frontImg.push("latest")
+                    }
+                }
+            }
+        }
+        stage('Build & Push Backend') {
+            steps {
+                script {
+                    docker.withRegistry("https://${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com", "ecr:us-east-1:aws-credentials") {
+                        def backImg = docker.build("${ECR_BACKEND}:${IMAGE_TAG}", "-f docker/backend/Dockerfile .")
+                        backImg.push("${IMAGE_TAG}")
+                        backImg.push("latest")
+                    }
+                }
+            }
+        }
+        stage('Deploy to EKS via Helm') {
+            steps {
+                sh """
+                aws eks update-kubeconfig --region ${AWS_REGION} --name mern-eks-cluster
+                helm upgrade --install mern-app ./helm/mern-app \
+                  --set frontend.image.tag=${IMAGE_TAG} \
+                  --set backend.image.tag=${IMAGE_TAG}
+                """
+            }
+        }
+    }
+}
